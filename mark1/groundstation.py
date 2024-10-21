@@ -12,6 +12,7 @@ from PIL import Image
 import io
 from collections import Counter
 import socket
+import struct
 
 # Compression functions
 def compress_with_rle(data: bytes) -> bytes:
@@ -113,61 +114,70 @@ def simulate_transmission(payload: bytes, compressed_payload: bytes):
     else:
         st.write("Compression did not reduce the size.")
 
-# Function to send payload to the echo server and receive it back
-def send_payload_to_server(payload: bytes, compression_method: str) -> None:
-    server_ip = '127.0.0.1'  # Assuming echo server is running locally
-    server_port = 122        # Echo server port
+def send_payload_to_server(compressed_payload: bytes, compression_method: str) -> None:
+    server_ip = '127.0.0.1'
+    server_port = 1222  # Updated port to 1222
 
     try:
-        # Create a socket object
         sock_fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock_fd.settimeout(5)  # Set a timeout of 5 seconds
-        st.write(f"Connecting to {server_ip} on port {server_port}...")
+        sock_fd.settimeout(5)
+        st.write(f"Connecting to satellite...")
 
-        # Connect to the server
         sock_fd.connect((server_ip, server_port))
-        st.write(f"Connected to {server_ip} on port {server_port}")
+        st.write(f"Connected to satellite!")
 
-        # Send the compression method first, followed by the payload
-        st.write(f"Sending {compression_method} compressed payload (size: {len(payload)} bytes)...")
-        sock_fd.sendall(f"{compression_method}\n".encode('utf-8') + payload + b'\n')
+        # Send the compression method and the compressed payload with null termination
+        st.write(f"Sending {compression_method} compressed payload (size: {len(compressed_payload)} bytes)...")
+        sock_fd.sendall(f"{compression_method}\n".encode('utf-8') + compressed_payload + b'\x00')  # Null-terminated
+        st.write("Payload sent.")
 
-        st.write("Payload sent. Awaiting stats and recompressed payload...")
+        # Define the format for the packed header
+        header_format = "iii f"
+        header_size = struct.calcsize(header_format)
 
-
-        buffer_size = 1024
-        if (len(payload) < buffer_size):
-            buffer_size = len(payload)
-        
-        # Receive the response (stats + recompressed payload)
-        received_data = b""
-        while True:
+        # Receive the packed header first
+        packed_header = b""
+        while len(packed_header) < header_size:
             try:
-                data = sock_fd.recv(buffer_size)  # Receive in chunks
-                if not data:
-                    break  # No more data
-                received_data += data
+                chunk = sock_fd.recv(header_size - len(packed_header))
+                if not chunk:
+                    raise socket.error("Connection closed unexpectedly")
+                packed_header += chunk
             except socket.timeout:
                 st.write("Timeout while waiting for server response")
-                break
+                return
 
-        # Separate stats from the recompressed payload
-        try:
-            if b'\n\n' in received_data:
-                response_parts = received_data.split(b'\n\n', 1)
-                stats_message = response_parts[0].decode('utf-8')
-                recompressed_payload = response_parts[1]
+        if len(packed_header) != header_size:
+            st.write("Error: Incomplete header received")
+            return
 
-                # Display the stats
-                st.write("Stats received from satellite:")
-                st.write(stats_message)
-            else:
-                # If the expected separator is not found, handle it
-                st.write("Invalid response format from server")
-                st.write(received_data.decode('utf-8'))
+        # Unpack the header
+        original_size, decompressed_size, recompressed_size, compression_ratio = struct.unpack(header_format, packed_header)
 
-        except Exception as e:
-            st.write(f"Error processing the response: {e}")
+        # Display the stats
+        st.write("Stats received from satellite:")
+        st.write(f"Size of the received payload (in compressed form): {original_size} bytes")
+        st.write(f"Decompressed size: {decompressed_size} bytes")
+        st.write(f"Recompressed size: {recompressed_size} bytes")
+        st.write(f"Compression ratio: {compression_ratio:.2f}%")
+
+        # Now receive the recompressed payload until we get the null byte
+        recompressed_payload = b""
+        while True:
+            try:
+                chunk = sock_fd.recv(1024)
+                if not chunk:
+                    raise socket.error("Connection closed unexpectedly")
+                recompressed_payload += chunk
+                if b'\x00' in recompressed_payload:
+                    recompressed_payload = recompressed_payload.rstrip(b'\x00')  # Strip null terminator
+                    break
+            except socket.timeout:
+                st.write("Timeout while waiting for the recompressed payload")
+                return
+
+        # Process the recompressed payload (if needed)
+        st.write(f"Received recompressed payload of size: {len(recompressed_payload)} bytes")
 
     except socket.error as e:
         st.write(f"Socket error: {e}")
