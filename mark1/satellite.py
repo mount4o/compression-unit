@@ -1,5 +1,4 @@
 import socket
-import gzip
 import zlib
 import lzma
 import brotli
@@ -38,12 +37,14 @@ def decompress_with_rle(data: bytes) -> bytes:
         i += 2
     return bytes(decompressed)
 
-# Decompression for bzip2, zstd, lzma, brotli, lz4, gzip, deflate
+def compress_with_deflate(data: bytes) -> bytes:
+    """Compress data using DEFLATE (zlib)."""
+    return zlib.compress(data)
+
+# Decompression for bzip2, zstd, lzma, brotli, lz4, deflate
 def decompress_payload(payload: bytes, compression_method: str) -> bytes:
     try:
-        if compression_method == "gzip":
-            return gzip.decompress(payload)
-        elif compression_method == "zlib":
+        if compression_method == "deflate":
             return zlib.decompress(payload)
         elif compression_method == "lzma":
             return lzma.decompress(payload)
@@ -68,9 +69,7 @@ def decompress_payload(payload: bytes, compression_method: str) -> bytes:
 # Compression functions (mirrors decompression)
 def recompress_payload(payload: bytes, compression_method: str) -> bytes:
     try:
-        if compression_method == "gzip":
-            return gzip.compress(payload)
-        elif compression_method == "zlib":
+        if compression_method == "deflate":
             return zlib.compress(payload)
         elif compression_method == "lzma":
             return lzma.compress(payload)

@@ -1,6 +1,5 @@
 import streamlit as st
 import brotli
-import gzip
 import lz4.frame
 import zlib
 import random
@@ -54,9 +53,6 @@ def compress_with_lzma(data: bytes) -> bytes:
 
 def compress_with_brotli(data: bytes) -> bytes:
     return brotli.compress(data)
-
-def compress_with_gzip(data: bytes) -> bytes:
-    return gzip.compress(data)
 
 def compress_with_lz4(data: bytes) -> bytes:
     return lz4.frame.compress(data)
@@ -225,15 +221,13 @@ def main():
 
     # Compression Algorithm selection
     if payload:
-        compression_method = st.selectbox("Choose a compression method", ['brotli', 'gzip', 'lz4', 'deflate', 'rle', 'bzip2', 'zstd', 'lzma'])
+        compression_method = st.selectbox("Choose a compression method", ['brotli', 'lz4', 'deflate', 'rle', 'bzip2', 'zstd', 'lzma'])
 
         entropy = calculate_entropy(payload)
         st.write(f"Entropy of the original payload: {entropy:.2f} bits per byte")
 
         if compression_method == "brotli":
             compressed_payload = compress_with_brotli(payload)
-        elif compression_method == "gzip":
-            compressed_payload = compress_with_gzip(payload)
         elif compression_method == "lz4":
             compressed_payload = compress_with_lz4(payload)
         elif compression_method == "deflate":
