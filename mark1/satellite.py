@@ -8,6 +8,7 @@ import bz2
 import struct
 from PIL import Image
 import io
+
 # Compression with RLE (Run-Length Encoding)
 def compress_with_rle(data: bytes) -> bytes:
     if not data:
@@ -101,45 +102,54 @@ def start_echo_server():
         server_socket.bind((server_ip, server_port))
         print(f"Server listening on {server_ip}:{server_port}")
 
-        server_socket.listen(5)
+        server_socket.listen(15)
 
         while True:
             client_socket, client_address = server_socket.accept()
             print(f"Connection from {client_address}")
 
             with client_socket:
-                received_data = b""
-                compression_method = None
-
-                # Read until we hit the null byte
-                while True:
-                    data = client_socket.recv(buffer_size)
-                    if not data:
-                        break
-                    received_data += data
-                    if b'\x00' in received_data:
-                        received_data = received_data.rstrip(b'\x00')  # Strip null terminator
-                        break
-                    print(f"Received {len(received_data)} bytes of data so far")
-
                 try:
-                    # Extract the compression method
-                    header_end_index = received_data.index(b'\n')
-                    compression_method = received_data[:header_end_index].decode('utf-8').strip()
-                    payload = received_data[header_end_index + 1:]
+                    # Step 1: Read the 4-byte preamble
+                    preamble = client_socket.recv(4)
+                    if preamble != b'\xaa\xbb\xcc\xdd':
+                        raise ValueError("Invalid preamble received.")
+                    print("Preamble received and validated.")
 
+                    # Step 2: Read the 4-byte payload size header
+                    size_header = client_socket.recv(4)
+                    if len(size_header) != 4:
+                        raise ValueError("Incomplete size header received.")
+                    payload_size = struct.unpack("!I", size_header)[0]
+                    print(f"Payload size received: {payload_size} bytes")
+
+                    # Step 3: Read the compression method (up to the first newline character)
+                    compression_method = b""
+                    while True:
+                        byte = client_socket.recv(1)
+                        if byte == b'\n':
+                            break
+                        compression_method += byte
+                    compression_method = compression_method.decode('utf-8').strip()
                     print(f"Compression method: {compression_method}")
-                    print(f"Received {len(payload)} bytes of payload")
 
-                    # Decompress the payload
+                    # Step 4: Read the payload based on the payload size
+                    payload = b""
+                    while len(payload) < payload_size:
+                        chunk = client_socket.recv(min(buffer_size, payload_size - len(payload)))
+                        if not chunk:
+                            raise ConnectionError("Connection closed unexpectedly.")
+                        payload += chunk
+                    print(f"Received payload of size: {len(payload)} bytes")
+
+                    # Process the payload (decompress, recompress, etc.)
                     decompressed_payload = decompress_payload(payload, compression_method)
                     print(f"Decompressed payload size: {len(decompressed_payload)} bytes")
 
-                    # Recompress the payload
                     recompressed_payload = recompress_payload(decompressed_payload, compression_method)
                     print(f"Recompressed payload size: {len(recompressed_payload)} bytes")
 
-                    # Calculate stats with the updated compression ratio formula
+                    # Calculate statistics
                     original_size = len(payload)
                     decompressed_size = len(decompressed_payload)
                     recompressed_size = len(recompressed_payload)
@@ -155,9 +165,9 @@ def start_echo_server():
                         compression_ratio
                     )
 
-                    print(f"Header size: {len(packed_header)}")
-                    # Send the packed header and recompressed payload, followed by a null terminator
-                    client_socket.sendall(packed_header + recompressed_payload + b'\x00')
+                    # Send the packed header and recompressed payload to the client
+                    client_socket.sendall(packed_header + recompressed_payload)
+                    print("Response sent to client.")
 
                 except Exception as e:
                     error_message = f"Error processing payload: {e}"

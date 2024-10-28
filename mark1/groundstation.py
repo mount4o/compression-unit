@@ -116,15 +116,20 @@ def send_payload_to_server(compressed_payload: bytes, compression_method: str) -
 
     try:
         sock_fd = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock_fd.settimeout(5)
+        sock_fd.settimeout(15)
         st.write(f"Connecting to satellite...")
 
         sock_fd.connect((server_ip, server_port))
         st.write(f"Connected to satellite!")
 
+        preamble_bytes = b'\xaa\xbb\xcc\xdd'
+        size_header = struct.pack("!I", len(compressed_payload))  # 4-byte header in network byte order
+        method_header = f"{compression_method}\n".encode('utf-8')  # Compression method followed by newline
+        full_message = preamble_bytes + size_header + method_header + compressed_payload
+
         # Send the compression method and the compressed payload with null termination
         st.write(f"Sending {compression_method} compressed payload (size: {len(compressed_payload)} bytes)...")
-        sock_fd.sendall(f"{compression_method}\n".encode('utf-8') + compressed_payload + b'\x00')  # Null-terminated
+        sock_fd.sendall(full_message)
         st.write("Payload sent.")
 
         # Define the format for the packed header
@@ -157,17 +162,20 @@ def send_payload_to_server(compressed_payload: bytes, compression_method: str) -
         st.write(f"Recompressed size: {recompressed_size} bytes")
         st.write(f"Compression ratio: {compression_ratio:.2f}%")
 
-        # Now receive the recompressed payload until we get the null byte
         recompressed_payload = b""
-        while True:
+        received_bytes = 0  # Track the number of bytes received so far
+
+        while received_bytes < recompressed_size:
             try:
-                chunk = sock_fd.recv(1024)
+                # Receive up to 1024 bytes or the remaining bytes, whichever is smaller
+                chunk = sock_fd.recv(min(1024, recompressed_size - received_bytes))
+        
                 if not chunk:
                     raise socket.error("Connection closed unexpectedly")
+        
                 recompressed_payload += chunk
-                if b'\x00' in recompressed_payload:
-                    recompressed_payload = recompressed_payload.rstrip(b'\x00')  # Strip null terminator
-                    break
+                received_bytes += len(chunk)
+    
             except socket.timeout:
                 st.write("Timeout while waiting for the recompressed payload")
                 return
@@ -210,9 +218,9 @@ def main():
                 compressed_payload = compress_image_lossless(payload)
                 st.write("Lossless compression applied to image.")
 
-            simulate_transmission(payload, compressed_payload)
-            send_payload_to_server(compressed_payload, compression_method)  # Send to server
-            return
+            # simulate_transmission(payload, compressed_payload)
+            # send_payload_to_server(compressed_payload, compression_method)  # Send to server
+            # return
 
     elif payload_type == "Random":
         size = st.slider("Select the size of the random payload (in bytes)", 1, 100000, 1024)
